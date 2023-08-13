@@ -1,14 +1,3 @@
-interface SerializeOptions {
-    encode?: (val: string | number | boolean) => string;
-    maxAge?: number;
-    domain?: string;
-    path?: string;
-    expires?: Date;
-    httpOnly?: boolean;
-    secure?: boolean;
-    priority?: string;
-    sameSite?: boolean | string;
-}
 declare abstract class BaseModel {
     [key: string]: any;
     id: string;
@@ -82,85 +71,13 @@ declare class Admin extends BaseModel {
         [key: string]: any;
     }): void;
 }
-type OnStoreChangeFunc = (token: string, model: Record | Admin | null) => void;
-/**
- * Base AuthStore class that is intended to be extended by all other
- * PocketBase AuthStore implementations.
- */
-declare abstract class BaseAuthStore {
-    protected baseToken: string;
-    protected baseModel: Record | Admin | null;
-    private _onChangeCallbacks;
-    /**
-     * Retrieves the stored token (if any).
-     */
-    get token(): string;
-    /**
-     * Retrieves the stored model data (if any).
-     */
-    get model(): Record | Admin | null;
-    /**
-     * Loosely checks if the store has valid token (aka. existing and unexpired exp claim).
-     */
-    get isValid(): boolean;
-    /**
-     * Saves the provided new token and model data in the auth store.
-     */
-    save(token: string, model: Record | Admin | null): void;
-    /**
-     * Removes the stored token and model data form the auth store.
-     */
-    clear(): void;
-    /**
-     * Parses the provided cookie string and updates the store state
-     * with the cookie's token and model data.
-     *
-     * NB! This function doesn't validate the token or its data.
-     * Usually this isn't a concern if you are interacting only with the
-     * PocketBase API because it has the proper server-side security checks in place,
-     * but if you are using the store `isValid` state for permission controls
-     * in a node server (eg. SSR), then it is recommended to call `authRefresh()`
-     * after loading the cookie to ensure an up-to-date token and model state.
-     * For example:
-     *
-     * ```js
-     * pb.authStore.loadFromCookie("cookie string...");
-     *
-     * try {
-     *     // get an up-to-date auth store state by veryfing and refreshing the loaded auth model (if any)
-     *     pb.authStore.isValid && await pb.collection('users').authRefresh();
-     * } catch (_) {
-     *     // clear the auth store on failed refresh
-     *     pb.authStore.clear();
-     * }
-     * ```
-     */
-    loadFromCookie(cookie: string, key?: string): void;
-    /**
-     * Exports the current store state as cookie string.
-     *
-     * By default the following optional attributes are added:
-     * - Secure
-     * - HttpOnly
-     * - SameSite=Strict
-     * - Path=/
-     * - Expires={the token expiration date}
-     *
-     * NB! If the generated cookie exceeds 4096 bytes, this method will
-     * strip the model data to the bare minimum to try to fit within the
-     * recommended size in https://www.rfc-editor.org/rfc/rfc6265#section-6.1.
-     */
-    exportToCookie(options?: SerializeOptions, key?: string): string;
-    /**
-     * Register a callback function that will be called on store change.
-     *
-     * You can set the `fireImmediately` argument to true in order to invoke
-     * the provided callback right after registration.
-     *
-     * Returns a removal function that you could call to "unsubscribe" from the changes.
-     */
-    onChange(callback: OnStoreChangeFunc, fireImmediately?: boolean): () => void;
-    protected triggerChange(): void;
+declare class ListResult<M = BaseModel> {
+    page: number;
+    perPage: number;
+    totalItems: number;
+    totalPages: number;
+    items: Array<M>;
+    constructor(page: number, perPage: number, totalItems: number, totalPages: number, items: Array<M>);
 }
 /**
  * BaseService class that should be inherited from all API services.
@@ -198,50 +115,6 @@ interface LogStatsQueryParams extends BaseQueryParams {
 interface FileQueryParams extends BaseQueryParams {
     thumb?: string;
     download?: boolean;
-}
-interface appleClientSecret {
-    secret: string;
-}
-declare class SettingsService extends BaseService {
-    /**
-     * Fetch all available app settings.
-     */
-    getAll(queryParams?: BaseQueryParams): Promise<{
-        [key: string]: any;
-    }>;
-    /**
-     * Bulk updates app settings.
-     */
-    update(bodyParams?: {}, queryParams?: BaseQueryParams): Promise<{
-        [key: string]: any;
-    }>;
-    /**
-     * Performs a S3 filesystem connection test.
-     *
-     * The currently supported `filesystem` are "storage" and "backups".
-     */
-    testS3(filesystem?: string, queryParams?: BaseQueryParams): Promise<boolean>;
-    /**
-     * Sends a test email.
-     *
-     * The possible `emailTemplate` values are:
-     * - verification
-     * - password-reset
-     * - email-change
-     */
-    testEmail(toEmail: string, emailTemplate: string, queryParams?: BaseQueryParams): Promise<boolean>;
-    /**
-     * Generates a new Apple OAuth2 client secret.
-     */
-    generateAppleClientSecret(clientId: string, teamId: string, keyId: string, privateKey: string, duration: number, bodyParams?: {}, queryParams?: BaseQueryParams): Promise<appleClientSecret>;
-}
-declare class ListResult<M = BaseModel> {
-    page: number;
-    perPage: number;
-    totalItems: number;
-    totalPages: number;
-    items: Array<M>;
-    constructor(page: number, perPage: number, totalItems: number, totalPages: number, items: Array<M>);
 }
 // @todo since there is no longer need of SubCrudService consider merging with CrudService in v0.9+
 declare abstract class BaseCrudService<M extends BaseModel> extends BaseService {
@@ -406,17 +279,173 @@ declare class AdminService extends CrudService<Admin> {
      */
     confirmPasswordReset(passwordResetToken: string, password: string, passwordConfirm: string, bodyParams?: {}, queryParams?: BaseQueryParams): Promise<boolean>;
 }
-declare class ExternalAuth extends BaseModel {
-    recordId: string;
-    collectionId: string;
-    provider: string;
-    providerId: string;
+interface BackupFileInfo {
+    key: string;
+    size: number;
+    modified: string;
+}
+declare class BackupService extends BaseService {
+    /**
+     * Returns list with all available backup files.
+     */
+    getFullList(queryParams?: BaseQueryParams): Promise<Array<BackupFileInfo>>;
+    /**
+     * Initializes a new backup.
+     */
+    create(basename: string, queryParams?: BaseQueryParams): Promise<boolean>;
+    /**
+     * Deletes a single backup file.
+     */
+    delete(key: string, queryParams?: BaseQueryParams): Promise<boolean>;
+    /**
+     * Initializes an app data restore from an existing backup.
+     */
+    restore(key: string, queryParams?: BaseQueryParams): Promise<boolean>;
+    /**
+     * Builds a download url for a single existing backup using an
+     * admin file token and the backup file key.
+     *
+     * The file token can be generated via `pb.files.getToken()`.
+     */
+    getDownloadUrl(token: string, key: string): string;
+}
+declare class SchemaField {
+    id: string;
+    name: string;
+    type: string;
+    system: boolean;
+    required: boolean;
+    options: {
+        [key: string]: any;
+    };
+    constructor(data?: {
+        [key: string]: any;
+    });
+}
+declare class Collection extends BaseModel {
+    name: string;
+    type: string;
+    schema: Array<SchemaField>;
+    indexes: Array<string>;
+    system: boolean;
+    listRule: null | string;
+    viewRule: null | string;
+    createRule: null | string;
+    updateRule: null | string;
+    deleteRule: null | string;
+    options: {
+        [key: string]: any;
+    };
     /**
      * @inheritdoc
      */
     $load(data: {
         [key: string]: any;
     }): void;
+    /**
+     * @deprecated Please use $isBase instead.
+     */
+    get isBase(): boolean;
+    /**
+     * Checks if the current model is "base" collection.
+     */
+    get $isBase(): boolean;
+    /**
+     * @deprecated Please use $isAuth instead.
+     */
+    get isAuth(): boolean;
+    /**
+     * Checks if the current model is "auth" collection.
+     */
+    get $isAuth(): boolean;
+    /**
+     * @deprecated Please use $isView instead.
+     */
+    get isView(): boolean;
+    /**
+     * Checks if the current model is "view" collection.
+     */
+    get $isView(): boolean;
+}
+declare class CollectionService extends CrudService<Collection> {
+    /**
+     * @inheritdoc
+     */
+    decode(data: {
+        [key: string]: any;
+    }): Collection;
+    /**
+     * @inheritdoc
+     */
+    get baseCrudPath(): string;
+    /**
+     * Imports the provided collections.
+     *
+     * If `deleteMissing` is `true`, all local collections and schema fields,
+     * that are not present in the imported configuration, WILL BE DELETED
+     * (including their related records data)!
+     */
+    import(collections: Array<Collection>, deleteMissing?: boolean, queryParams?: BaseQueryParams): Promise<true>;
+}
+declare class FileService extends BaseService {
+    /**
+     * Builds and returns an absolute record file url for the provided filename.
+     */
+    getUrl(record: Pick<Record, "id" | "collectionId" | "collectionName">, filename: string, queryParams?: FileQueryParams): string;
+    /**
+     * Requests a new private file access token for the current auth model (admin or record).
+     */
+    getToken(queryParams?: BaseQueryParams): Promise<string>;
+}
+interface HealthCheckResponse {
+    code: number;
+    message: string;
+    data: {
+        [key: string]: any;
+    };
+}
+declare class HealthService extends BaseService {
+    /**
+     * Checks the health status of the api.
+     */
+    check(queryParams?: BaseQueryParams): Promise<HealthCheckResponse>;
+}
+declare class LogRequest extends BaseModel {
+    url: string;
+    method: string;
+    status: number;
+    auth: string;
+    remoteIp: string;
+    userIp: string;
+    referer: string;
+    userAgent: string;
+    meta: {
+        [key: string]: any;
+    };
+    /**
+     * @inheritdoc
+     */
+    $load(data: {
+        [key: string]: any;
+    }): void;
+}
+interface HourlyStats {
+    total: number;
+    date: string;
+}
+declare class LogService extends BaseService {
+    /**
+     * Returns paginated logged requests list.
+     */
+    getRequestsList(page?: number, perPage?: number, queryParams?: ListQueryParams): Promise<ListResult<LogRequest>>;
+    /**
+     * Returns a single logged request by its id.
+     */
+    getRequest(id: string, queryParams?: BaseQueryParams): Promise<LogRequest>;
+    /**
+     * Returns request logs statistics.
+     */
+    getRequestsStats(queryParams?: LogStatsQueryParams): Promise<Array<HourlyStats>>;
 }
 type UnsubscribeFunc = () => Promise<void>;
 declare class RealtimeService extends BaseService {
@@ -486,6 +515,18 @@ declare class RealtimeService extends BaseService {
     private hasUnsentSubscriptions;
     private connectErrorHandler;
     private disconnect;
+}
+declare class ExternalAuth extends BaseModel {
+    recordId: string;
+    collectionId: string;
+    provider: string;
+    providerId: string;
+    /**
+     * @inheritdoc
+     */
+    $load(data: {
+        [key: string]: any;
+    }): void;
 }
 interface RecordAuthResponse<T = Record> {
     record: T;
@@ -745,173 +786,132 @@ declare class RecordService extends CrudService<Record> {
     private _replaceQueryParams;
     private _defaultUrlCallback;
 }
-declare class SchemaField {
-    id: string;
-    name: string;
-    type: string;
-    system: boolean;
-    required: boolean;
-    options: {
-        [key: string]: any;
-    };
-    constructor(data?: {
-        [key: string]: any;
-    });
+interface appleClientSecret {
+    secret: string;
 }
-declare class Collection extends BaseModel {
-    name: string;
-    type: string;
-    schema: Array<SchemaField>;
-    indexes: Array<string>;
-    system: boolean;
-    listRule: null | string;
-    viewRule: null | string;
-    createRule: null | string;
-    updateRule: null | string;
-    deleteRule: null | string;
-    options: {
+declare class SettingsService extends BaseService {
+    /**
+     * Fetch all available app settings.
+     */
+    getAll(queryParams?: BaseQueryParams): Promise<{
         [key: string]: any;
-    };
+    }>;
     /**
-     * @inheritdoc
+     * Bulk updates app settings.
      */
-    $load(data: {
+    update(bodyParams?: {}, queryParams?: BaseQueryParams): Promise<{
         [key: string]: any;
-    }): void;
+    }>;
     /**
-     * @deprecated Please use $isBase instead.
-     */
-    get isBase(): boolean;
-    /**
-     * Checks if the current model is "base" collection.
-     */
-    get $isBase(): boolean;
-    /**
-     * @deprecated Please use $isAuth instead.
-     */
-    get isAuth(): boolean;
-    /**
-     * Checks if the current model is "auth" collection.
-     */
-    get $isAuth(): boolean;
-    /**
-     * @deprecated Please use $isView instead.
-     */
-    get isView(): boolean;
-    /**
-     * Checks if the current model is "view" collection.
-     */
-    get $isView(): boolean;
-}
-declare class CollectionService extends CrudService<Collection> {
-    /**
-     * @inheritdoc
-     */
-    decode(data: {
-        [key: string]: any;
-    }): Collection;
-    /**
-     * @inheritdoc
-     */
-    get baseCrudPath(): string;
-    /**
-     * Imports the provided collections.
+     * Performs a S3 filesystem connection test.
      *
-     * If `deleteMissing` is `true`, all local collections and schema fields,
-     * that are not present in the imported configuration, WILL BE DELETED
-     * (including their related records data)!
+     * The currently supported `filesystem` are "storage" and "backups".
      */
-    import(collections: Array<Collection>, deleteMissing?: boolean, queryParams?: BaseQueryParams): Promise<true>;
-}
-declare class LogRequest extends BaseModel {
-    url: string;
-    method: string;
-    status: number;
-    auth: string;
-    remoteIp: string;
-    userIp: string;
-    referer: string;
-    userAgent: string;
-    meta: {
-        [key: string]: any;
-    };
+    testS3(filesystem?: string, queryParams?: BaseQueryParams): Promise<boolean>;
     /**
-     * @inheritdoc
-     */
-    $load(data: {
-        [key: string]: any;
-    }): void;
-}
-interface HourlyStats {
-    total: number;
-    date: string;
-}
-declare class LogService extends BaseService {
-    /**
-     * Returns paginated logged requests list.
-     */
-    getRequestsList(page?: number, perPage?: number, queryParams?: ListQueryParams): Promise<ListResult<LogRequest>>;
-    /**
-     * Returns a single logged request by its id.
-     */
-    getRequest(id: string, queryParams?: BaseQueryParams): Promise<LogRequest>;
-    /**
-     * Returns request logs statistics.
-     */
-    getRequestsStats(queryParams?: LogStatsQueryParams): Promise<Array<HourlyStats>>;
-}
-interface HealthCheckResponse {
-    code: number;
-    message: string;
-    data: {
-        [key: string]: any;
-    };
-}
-declare class HealthService extends BaseService {
-    /**
-     * Checks the health status of the api.
-     */
-    check(queryParams?: BaseQueryParams): Promise<HealthCheckResponse>;
-}
-declare class FileService extends BaseService {
-    /**
-     * Builds and returns an absolute record file url for the provided filename.
-     */
-    getUrl(record: Pick<Record, "id" | "collectionId" | "collectionName">, filename: string, queryParams?: FileQueryParams): string;
-    /**
-     * Requests a new private file access token for the current auth model (admin or record).
-     */
-    getToken(queryParams?: BaseQueryParams): Promise<string>;
-}
-interface BackupFileInfo {
-    key: string;
-    size: number;
-    modified: string;
-}
-declare class BackupService extends BaseService {
-    /**
-     * Returns list with all available backup files.
-     */
-    getFullList(queryParams?: BaseQueryParams): Promise<Array<BackupFileInfo>>;
-    /**
-     * Initializes a new backup.
-     */
-    create(basename: string, queryParams?: BaseQueryParams): Promise<boolean>;
-    /**
-     * Deletes a single backup file.
-     */
-    delete(key: string, queryParams?: BaseQueryParams): Promise<boolean>;
-    /**
-     * Initializes an app data restore from an existing backup.
-     */
-    restore(key: string, queryParams?: BaseQueryParams): Promise<boolean>;
-    /**
-     * Builds a download url for a single existing backup using an
-     * admin file token and the backup file key.
+     * Sends a test email.
      *
-     * The file token can be generated via `pb.files.getToken()`.
+     * The possible `emailTemplate` values are:
+     * - verification
+     * - password-reset
+     * - email-change
      */
-    getDownloadUrl(token: string, key: string): string;
+    testEmail(toEmail: string, emailTemplate: string, queryParams?: BaseQueryParams): Promise<boolean>;
+    /**
+     * Generates a new Apple OAuth2 client secret.
+     */
+    generateAppleClientSecret(clientId: string, teamId: string, keyId: string, privateKey: string, duration: number, bodyParams?: {}, queryParams?: BaseQueryParams): Promise<appleClientSecret>;
+}
+interface SerializeOptions {
+    encode?: (val: string | number | boolean) => string;
+    maxAge?: number;
+    domain?: string;
+    path?: string;
+    expires?: Date;
+    httpOnly?: boolean;
+    secure?: boolean;
+    priority?: string;
+    sameSite?: boolean | string;
+}
+type OnStoreChangeFunc = (token: string, model: Record | Admin | null) => void;
+/**
+ * Base AuthStore class that is intended to be extended by all other
+ * PocketBase AuthStore implementations.
+ */
+declare abstract class BaseAuthStore {
+    protected baseToken: string;
+    protected baseModel: Record | Admin | null;
+    private _onChangeCallbacks;
+    /**
+     * Retrieves the stored token (if any).
+     */
+    get token(): string;
+    /**
+     * Retrieves the stored model data (if any).
+     */
+    get model(): Record | Admin | null;
+    /**
+     * Loosely checks if the store has valid token (aka. existing and unexpired exp claim).
+     */
+    get isValid(): boolean;
+    /**
+     * Saves the provided new token and model data in the auth store.
+     */
+    save(token: string, model: Record | Admin | null): void;
+    /**
+     * Removes the stored token and model data form the auth store.
+     */
+    clear(): void;
+    /**
+     * Parses the provided cookie string and updates the store state
+     * with the cookie's token and model data.
+     *
+     * NB! This function doesn't validate the token or its data.
+     * Usually this isn't a concern if you are interacting only with the
+     * PocketBase API because it has the proper server-side security checks in place,
+     * but if you are using the store `isValid` state for permission controls
+     * in a node server (eg. SSR), then it is recommended to call `authRefresh()`
+     * after loading the cookie to ensure an up-to-date token and model state.
+     * For example:
+     *
+     * ```js
+     * pb.authStore.loadFromCookie("cookie string...");
+     *
+     * try {
+     *     // get an up-to-date auth store state by veryfing and refreshing the loaded auth model (if any)
+     *     pb.authStore.isValid && await pb.collection('users').authRefresh();
+     * } catch (_) {
+     *     // clear the auth store on failed refresh
+     *     pb.authStore.clear();
+     * }
+     * ```
+     */
+    loadFromCookie(cookie: string, key?: string): void;
+    /**
+     * Exports the current store state as cookie string.
+     *
+     * By default the following optional attributes are added:
+     * - Secure
+     * - HttpOnly
+     * - SameSite=Strict
+     * - Path=/
+     * - Expires={the token expiration date}
+     *
+     * NB! If the generated cookie exceeds 4096 bytes, this method will
+     * strip the model data to the bare minimum to try to fit within the
+     * recommended size in https://www.rfc-editor.org/rfc/rfc6265#section-6.1.
+     */
+    exportToCookie(options?: SerializeOptions, key?: string): string;
+    /**
+     * Register a callback function that will be called on store change.
+     *
+     * You can set the `fireImmediately` argument to true in order to invoke
+     * the provided callback right after registration.
+     *
+     * Returns a removal function that you could call to "unsubscribe" from the changes.
+     */
+    onChange(callback: OnStoreChangeFunc, fireImmediately?: boolean): () => void;
+    protected triggerChange(): void;
 }
 interface SendOptions extends RequestInit {
     headers?: {
@@ -927,6 +927,7 @@ interface BeforeSendResult {
         [key: string]: any;
     };
 }
+type FetchFunc = typeof fetch;
 /**
  * PocketBase JS Client.
  */
@@ -1021,7 +1022,8 @@ declare class Client {
     private cancelControllers;
     private recordServices;
     private enableAutoCancellation;
-    constructor(baseUrl?: string, authStore?: BaseAuthStore | null, lang?: string);
+    private fetchFunc;
+    constructor(baseUrl?: string, authStore?: BaseAuthStore | null, lang?: string, fetchFunc?: FetchFunc | null);
     /**
      * Returns the RecordService associated to the specified collection.
      *
